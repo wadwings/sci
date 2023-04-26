@@ -543,7 +543,7 @@ ENTRY(interrupt_entry)
 	ENCODE_FRAME_POINTER 8
 
 	testb	$3, CS+8(%rsp)
-	jz	1f
+	jz	.Linterrupt_entry_kernel
 
 	/*
 	 * IRQ from user mode.
@@ -559,12 +559,17 @@ ENTRY(interrupt_entry)
 
 	CALL_enter_from_user_mode
 
-1:
+.Linterrupt_entry_done:
 	ENTER_IRQ_STACK old_rsp=%rdi save_ret=1
 	/* We entered an interrupt context - irqs are off: */
 	TRACE_IRQS_OFF
 
 	ret
+
+.Linterrupt_entry_kernel:
+	SAVE_AND_SWITCH_SCI_TO_KERNEL_CR3 scratch_reg=%rax save_reg=%r14
+	jmp	.Linterrupt_entry_done
+
 END(interrupt_entry)
 _ASM_NOKPROBE(interrupt_entry)
 
@@ -655,6 +660,8 @@ retint_kernel:
 	 * The iretq could re-enable interrupts:
 	 */
 	TRACE_IRQS_IRETQ
+
+	RESTORE_SCI_CR3 scratch_reg=%rax save_reg=%r14
 
 GLOBAL(restore_regs_and_return_to_kernel)
 #ifdef CONFIG_DEBUG_ENTRY
@@ -1263,6 +1270,8 @@ ENTRY(error_entry)
 	 * for these here too.
 	 */
 .Lerror_kernelspace:
+	SAVE_AND_SWITCH_SCI_TO_KERNEL_CR3 scratch_reg=%rax save_reg=%r14
+
 	leaq	native_irq_return_iret(%rip), %rcx
 	cmpq	%rcx, RIP+8(%rsp)
 	je	.Lerror_bad_iret

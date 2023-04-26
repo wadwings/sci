@@ -343,6 +343,9 @@
 332	common	statx			__x64_sys_statx
 333	common	io_pgetevents		__x64_sys_io_pgetevents
 334	common	rseq			__x64_sys_rseq
+335	64	get_answer		__x64_sys_get_answer
+336	64	sci_write_dmesg		__x64_sys_sci_write_dmesg
+337	64	sci_write_dmesg_bad	__x64_sys_sci_write_dmesg_bad
 
 #
 # x32-specific system call numbers start at 512 to avoid cache impact

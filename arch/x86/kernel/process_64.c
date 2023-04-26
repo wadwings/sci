@@ -55,6 +55,8 @@
 #include <asm/resctrl_sched.h>
 #include <asm/unistd.h>
 #include <asm/fsgsbase.h>
+#include <asm/sci.h>
+
 #ifdef CONFIG_IA32_EMULATION
 /* Not included via unistd.h */
 #include <asm/unistd_32_ia32.h>
@@ -580,6 +582,9 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	update_task_stack(next_p);
 
 	switch_to_extra(prev_p, next_p);
+
+	/* update syscall isolation per-cpu data */
+	sci_switch_to(next_p);
 
 #ifdef CONFIG_XEN_PV
 	/*

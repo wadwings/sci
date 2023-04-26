@@ -187,6 +187,56 @@ For 32-bit we have the following conventions - kernel is built with
 #endif
 .endm
 
+#ifdef CONFIG_SYSCALL_ISOLATION
+
+#define SCI_PCID_BIT		X86_CR3_SCI_PCID_BIT
+
+#define THIS_CPU_sci_syscall   \
+	PER_CPU_VAR(cpu_sci) + SCI_SYSCALL
+
+#define THIS_CPU_sci_cr3_offset   \
+	PER_CPU_VAR(cpu_sci) + SCI_CR3_OFFSET
+
+.macro SAVE_AND_SWITCH_SCI_TO_KERNEL_CR3 scratch_reg:req save_reg:req
+	ALTERNATIVE "jmp .Ldone_\@", "", X86_FEATURE_SCI
+	movq	THIS_CPU_sci_syscall, \scratch_reg
+	cmpq	$0, \scratch_reg
+	je	.Ldone_\@
+	movq	%cr3, \scratch_reg
+	bt	$SCI_PCID_BIT, \scratch_reg
+	jc	.Lsci_context_\@
+	xorq	\save_reg, \save_reg
+	jmp	.Ldone_\@
+.Lsci_context_\@:
+	movq	\scratch_reg, \save_reg
+	addq	THIS_CPU_sci_cr3_offset, \scratch_reg
+	movq	\scratch_reg, %cr3
+.Ldone_\@:
+.endm
+
+.macro RESTORE_SCI_CR3 scratch_reg:req save_reg:req
+	ALTERNATIVE "jmp .Ldone_\@", "", X86_FEATURE_SCI
+	movq	THIS_CPU_sci_syscall, \scratch_reg
+	cmpq	$0, \scratch_reg
+	je	.Ldone_\@
+	movq	\save_reg, \scratch_reg
+	cmpq	$0, \scratch_reg
+	je	.Ldone_\@
+	xorq	\save_reg, \save_reg
+	movq	\scratch_reg, %cr3
+.Ldone_\@:
+.endm
+
+#else /* CONFIG_SYSCALL_ISOLATION */
+
+.macro SAVE_AND_SWITCH_SCI_TO_KERNEL_CR3 scratch_reg:req save_reg:req
+.endm
+
+.macro RESTORE_SCI_CR3 scratch_reg:req save_reg:req
+.endm
+
+#endif /* CONFIG_SYSCALL_ISOLATION */
+
 #ifdef CONFIG_PAGE_TABLE_ISOLATION
 
 /*
@@ -264,6 +314,21 @@ For 32-bit we have the following conventions - kernel is built with
 	ALTERNATIVE "jmp .Ldone_\@", "", X86_FEATURE_PTI
 	movq	%cr3, \scratch_reg
 	movq	\scratch_reg, \save_reg
+
+#ifdef CONFIG_SYSCALL_ISOLATION
+	/*
+	 * Test the SCI PCID bit. If set, then the SCI page tables are
+	 * active. If clear CR3 has either the kernel or user page
+	 * table active.
+	 */
+	ALTERNATIVE "jmp .Lcheck_user_pt_\@", "", X86_FEATURE_SCI
+	bt	$SCI_PCID_BIT, \scratch_reg
+	jnc	.Lcheck_user_pt_\@
+	addq	THIS_CPU_sci_cr3_offset, \scratch_reg
+	movq	\scratch_reg, %cr3
+	jmp	.Ldone_\@
+.Lcheck_user_pt_\@:
+#endif
 	/*
 	 * Test the user pagetable bit. If set, then the user page tables
 	 * are active. If clear CR3 already has the kernel page table

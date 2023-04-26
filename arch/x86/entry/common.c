@@ -25,12 +25,14 @@
 #include <linux/uprobes.h>
 #include <linux/livepatch.h>
 #include <linux/syscalls.h>
+#include <linux/sci.h>
 
 #include <asm/desc.h>
 #include <asm/traps.h>
 #include <asm/vdso.h>
 #include <linux/uaccess.h>
 #include <asm/cpufeature.h>
+#include <asm/tlbflush.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/syscalls.h>
@@ -269,6 +271,54 @@ __visible inline void syscall_return_slowpath(struct pt_regs *regs)
 }
 
 #ifdef CONFIG_X86_64
+
+#ifdef CONFIG_SYSCALL_ISOLATION
+static inline bool sci_required(unsigned long nr)
+{
+	if (!static_cpu_has(X86_FEATURE_SCI))
+		return false;
+	if (nr < __NR_get_answer)
+		return false;
+	return true;
+}
+
+static inline unsigned long sci_syscall_enter(unsigned long nr)
+{
+	unsigned long sci_cr3, kernel_cr3;
+	unsigned long asid;
+
+	kernel_cr3 = __read_cr3();
+	asid = kernel_cr3 & ~PAGE_MASK;
+
+	sci_cr3 = build_cr3(current->sci->pgd, 0) & PAGE_MASK;
+	sci_cr3 |= (asid | (1 << X86_CR3_SCI_PCID_BIT));
+
+	current->in_isolated_syscall = 1;
+	current->sci->cr3_offset = kernel_cr3 - sci_cr3;
+
+	this_cpu_write(cpu_sci.sci_syscall, 1);
+	this_cpu_write(cpu_sci.sci_cr3_offset, current->sci->cr3_offset);
+
+	write_cr3(sci_cr3);
+
+	return kernel_cr3;
+}
+
+static inline void sci_syscall_exit(unsigned long cr3)
+{
+	if (cr3) {
+		write_cr3(cr3);
+		current->in_isolated_syscall = 0;
+		this_cpu_write(cpu_sci.sci_syscall, 0);
+		sci_clear_data();
+	}
+}
+#else
+static inline bool sci_required(unsigned long nr) { return false; }
+static inline unsigned long sci_syscall_enter(unsigned long nr) { return 0; }
+static inline void sci_syscall_exit(unsigned long cr3) {}
+#endif
+
 __visible void do_syscall_64(unsigned long nr, struct pt_regs *regs)
 {
 	struct thread_info *ti;
@@ -286,10 +336,25 @@ __visible void do_syscall_64(unsigned long nr, struct pt_regs *regs)
 	 */
 	nr &= __SYSCALL_MASK;
 	if (likely(nr < NR_syscalls)) {
+		unsigned long sci_cr3 = 0;
+
 		nr = array_index_nospec(nr, NR_syscalls);
+
+		if (sci_required(nr)) {
+			int err = sci_init(current);
+
+			if (err) {
+				regs->ax = err;
+				goto err_return_from_syscall;
+			}
+			sci_cr3 = sci_syscall_enter(nr);
+		}
+
 		regs->ax = sys_call_table[nr](regs);
+		sci_syscall_exit(sci_cr3);
 	}
 
+err_return_from_syscall:
 	syscall_return_slowpath(regs);
 }
 #endif

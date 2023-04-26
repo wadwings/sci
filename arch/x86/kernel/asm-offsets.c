@@ -18,6 +18,7 @@
 #include <asm/bootparam.h>
 #include <asm/suspend.h>
 #include <asm/tlbflush.h>
+#include <asm/sci.h>
 
 #ifdef CONFIG_XEN
 #include <xen/interface/xen.h>
@@ -105,4 +106,10 @@ static void __used common(void)
 	OFFSET(TSS_sp0, tss_struct, x86_tss.sp0);
 	OFFSET(TSS_sp1, tss_struct, x86_tss.sp1);
 	OFFSET(TSS_sp2, tss_struct, x86_tss.sp2);
+
+#ifdef CONFIG_SYSCALL_ISOLATION
+	/* system calls isolation */
+	OFFSET(SCI_SYSCALL, sci_percpu_data, sci_syscall);
+	OFFSET(SCI_CR3_OFFSET, sci_percpu_data, sci_cr3_offset);
+#endif
 }

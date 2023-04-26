@@ -18,6 +18,7 @@
 #include <linux/uaccess.h>		/* faulthandler_disabled()	*/
 #include <linux/efi.h>			/* efi_recover_from_page_fault()*/
 #include <linux/mm_types.h>
+#include <linux/sci.h>			/* sci_verify_and_map()		*/
 
 #include <asm/cpufeature.h>		/* boot_cpu_has, ...		*/
 #include <asm/traps.h>			/* dotraplinkage, ...		*/
@@ -1254,6 +1255,30 @@ static int fault_in_kernel_space(unsigned long address)
 	return address >= TASK_SIZE_MAX;
 }
 
+#ifdef CONFIG_SYSCALL_ISOLATION
+static int sci_fault(struct pt_regs *regs, unsigned long hw_error_code,
+		     unsigned long address)
+{
+	struct task_struct *tsk = current;
+
+	if (!tsk->in_isolated_syscall)
+		return 0;
+
+	if (!sci_verify_and_map(regs, address, hw_error_code)) {
+		this_cpu_write(cpu_sci.sci_syscall, 0);
+		no_context(regs, hw_error_code, address, SIGKILL, 0);
+	}
+
+	return 1;
+}
+#else
+static inline int sci_fault(struct pt_regs *regs, unsigned long hw_error_code,
+			    unsigned long address)
+{
+	return 0;
+}
+#endif
+
 /*
  * Called for all faults where 'address' is part of the kernel address
  * space.  Might get called for faults that originate from *code* that
@@ -1299,6 +1324,9 @@ do_kern_addr_fault(struct pt_regs *regs, unsigned long hw_error_code,
 
 	/* kprobes don't want to hook the spurious faults: */
 	if (kprobes_fault(regs))
+		return;
+
+	if (sci_fault(regs, hw_error_code, address))
 		return;
 
 	/*

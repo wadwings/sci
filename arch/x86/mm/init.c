@@ -22,6 +22,7 @@
 #include <asm/hypervisor.h>
 #include <asm/cpufeature.h>
 #include <asm/pti.h>
+#include <asm/sci.h>
 
 /*
  * We need to define the tracepoints somewhere, and tlb.c
@@ -648,6 +649,7 @@ void __init init_mem_mapping(void)
 	unsigned long end;
 
 	pti_check_boottime_disable();
+	sci_check_boottime_disable();
 	probe_page_size_mask();
 	setup_pcid();
 
